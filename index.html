@@ -190,9 +190,6 @@ const LS={
   set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
 };
 
-// ─── Login local (não depende do Firebase Authentication) ─────────
-const LOCAL_AUTH={ email:'bianca.ieck@gmail.com', pass:'1234Bap53-' };
-
 // ─── Recuperação única de propostas (proteção contra o bug de login antigo) ─
 // A versão anterior do app apagava 'orv_proposals2' do localStorage sempre que
 // a página carregava sem login bem-sucedido no Firebase. Este bloco roda uma
@@ -802,9 +799,9 @@ async function generateWord(prop, services, configs) {
 
 // ─── APP ────────────────────────────────────────────────────────
 function App(){
-  const[authed,setAuthed]=useState(()=>LS.get('orv_local_authed',false));
+  const[authed,setAuthed]=useState(false);
   const[fbUser,setFbUser]=useState(null);
-  const[loading,setLoading]=useState(false);
+  const[loading,setLoading]=useState(true);
   const[page,setPage]=useState('propostas');
   const[proposals,setProposals]=useState(()=>LS.get('orv_proposals2',[]));
   const[services,setServices]=useState(()=>LS.get('orv_services2',DEFAULT_SERVICES));
@@ -819,13 +816,10 @@ function App(){
   const[syncStatus,setSyncStatus]=useState('');
 
   useEffect(()=>{
-    // Login do app agora é local (não depende do Firebase Authentication).
-    // Se por acaso já existir uma sessão do Firebase ativa, aproveita pra
-    // sincronizar na nuvem, mas isso nunca bloqueia nem controla o acesso.
     const init=()=>{
       if(window._FB){
         window._FB.onAuth(user=>{
-          setFbUser(user);
+          setFbUser(user);setAuthed(!!user);setLoading(false);
           if(user) loadFromFirebase();
         });
       } else { setTimeout(init,300); }
@@ -882,7 +876,7 @@ function App(){
     </div>
   );
 
-  if(!authed) return <Login onLogin={()=>{ LS.set('orv_local_authed',true); setAuthed(true); }}/>;
+  if(!authed) return <Login/>;
 
   const nav=[
     {id:'dashboard',icon:'📊',label:'Dashboard'},
@@ -892,8 +886,7 @@ function App(){
   ];
 
   const handleSignOut=async()=>{
-    if(window._FB) { try{ await window._FB.signOut(); }catch{} }
-    LS.set('orv_local_authed',false);
+    if(window._FB) await window._FB.signOut();
     setAuthed(false);setFbUser(null);
   };
 
@@ -917,7 +910,7 @@ function App(){
         </nav>
         <div className="sidebar-footer">
           {syncStatus&&<div style={{fontSize:11,color:'rgba(255,255,255,.7)',marginBottom:5,textAlign:'center'}}>{syncStatus}</div>}
-          <div className="user"><strong>Bianca Iéck</strong>{fbUser?.email||LOCAL_AUTH.email}</div>
+          <div className="user"><strong>Bianca Iéck</strong>{fbUser?.email||'Orvalho Consultoria'}</div>
           <button className="btn btn-secondary btn-sm" style={{marginTop:8,width:'100%'}} onClick={handleSignOut}>Sair</button>
         </div>
       </aside>
@@ -931,20 +924,26 @@ function App(){
   );
 }
 // ─── LOGIN ───────────────────────────────────────────────────────
-function Login({onLogin}){
-  const[email,setEmail]=useState(LOCAL_AUTH.email);
+function Login(){
+  const[email,setEmail]=useState('bianca.ieck@gmail.com');
   const[pass,setPass]=useState('');
   const[err,setErr]=useState('');
   const[loading,setLoading]=useState(false);
   const go=async()=>{
     if(!email||!pass){setErr('Preencha e-mail e senha.');return;}
     setLoading(true);setErr('');
-    // Login local — não depende do Firebase Authentication.
-    const ok=email.trim().toLowerCase()===LOCAL_AUTH.email.toLowerCase() && pass===LOCAL_AUTH.pass;
-    if(ok){
-      onLogin();
-    } else {
-      setErr('E-mail ou senha incorretos.');
+    try{
+      if(window._FB){ await window._FB.signIn(email,pass); }
+      else { setErr('Aguarde, conectando ao servidor...'); }
+    }catch(e){
+      const msgs={
+        'auth/invalid-credential':'E-mail ou senha incorretos.',
+        'auth/user-not-found':'Usuário não encontrado.',
+        'auth/wrong-password':'Senha incorreta.',
+        'auth/too-many-requests':'Muitas tentativas. Aguarde alguns minutos.',
+        'auth/network-request-failed':'Sem conexão com a internet.',
+      };
+      setErr(msgs[e.code]||'Erro ao entrar: '+e.message);
     }
     setLoading(false);
   };
